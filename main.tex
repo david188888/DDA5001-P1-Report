@@ -8,7 +8,7 @@
 \setlist{nosep,leftmargin=*}
 
 \title{\vspace{-1.4cm}\large DDA5001 Final Project Part I: Pre-training a Small GPT on Shakespeare\vspace{-0.25cm}}
-\author{\normalsize David LIU \quad Student ID: \textcolor{red}{[TODO]} \quad (individual group)}
+\author{\normalsize David LIU \quad Student ID: 226040348 \quad (individual group)}
 \date{\vspace{-0.9cm}}
 
 \begin{document}
@@ -56,26 +56,15 @@ LUCIO: From whom you may, there's no better knave?
 \vspace{-12pt}
 (Line breaks after speaker names removed to save space.)
 
-\textbf{Difficulties and solutions.} (1) \emph{Copied text}: the AdamW and Muon samples read like real Shakespeare, so I measured their verbatim overlap with the training split (Table~\ref{tab:results}). (2) \emph{Unfair timing}: the first default-Muon run shared its GPU with another process (0.59\,s per update), so I re-ran it on an idle GPU (App.~\ref{app:time}). (3) \emph{Blocked queue}: \texttt{train.py} refuses an existing \texttt{out\_dir}, so a leftover folder from a failed launch stopped a queued run; I removed it and relaunched.
+\textbf{Difficulties and solutions.} (1) \emph{Copied text}: the AdamW and Muon samples read like real Shakespeare, so I measured their verbatim overlap with the training split (Table~\ref{tab:results}). (2) \emph{Unfair timing}: the first default-Muon run shared its GPU with another process (0.59\,s per update), so I re-ran it on an idle GPU (App.~\ref{app:time}).
 
 \textbf{Contribution.} Individual group; all work by David LIU. A coding agent (Claude Code) helped, following \texttt{AGENTS.md}, to fill the TODO blocks, write the analysis script and draft this report; I ran all experiments and checked the results.
 
 \label{end-main}
 \clearpage
 \appendix
-\section{Training time per update}\label{app:time}
-\begin{tabular}{lccp{5.2cm}}
-\toprule
-Run & GPU & s / update & Note \\
-\midrule
-AdamW $3\times10^{-4}$, SGDM 0.1 & GPU0 & 0.358, 0.360 & batch 1 \\
-Muon $10^{-2}$ (first run) & GPU1 & 0.594 & GPU shared with another process \\
-Muon $10^{-2}$ (re-run) & GPU0 & 0.410 & idle GPU; used in Fig.~\ref{fig:curves}, Table~\ref{tab:results} \\
-AdamW $10^{-4}$, Muon $3\times10^{-3}$, SGDM 0.2 & GPU0 & 0.361, 0.419, 0.355 & batch 2, sequential \\
-\bottomrule
-\end{tabular}
-
-The two GPUs are the same model (RTX 4090, driver 570.195). AdamW ran at the same speed whether or not the other GPU was busy, so the slow first Muon run was caused by its own GPU being shared. The re-run used the same seed (42). Its endpoint validation loss is 4.100 against 4.085 in the first run (minimum 1.542 against 1.538); the small gap is likely due to non-deterministic bf16 GPU kernels. All reported Muon $10^{-2}$ numbers come from the re-run.
+\section{Muon re-run}\label{app:time}
+The first default-Muon run shared its GPU with another process and took 0.594\,s per update, against 0.410\,s when re-run on an idle GPU of the same model (RTX 4090). The re-run used the same seed (42); its endpoint validation loss is 4.100 against 4.085 (minimum 1.542 against 1.538), a small gap likely due to non-deterministic bf16 kernels. All reported Muon $10^{-2}$ numbers come from the re-run.
 
 \section{Measuring copied text}\label{app:copy}
 Each sample has 400 characters. I took every 40-character window with stride 5 (73 windows) and counted the windows that appear verbatim in the training split (the first 1,003,854 characters of \texttt{input.txt}). A window of 40 characters is long enough that a random match is very unlikely. Both Muon samples are identical because \texttt{sample.py} uses a fixed seed and both models reproduce the same training passage (\emph{The Winter's Tale}, Act~IV). Default-AdamW sample excerpt, copied from \emph{Henry VI, Part 3}:
