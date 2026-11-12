@@ -1,11 +1,17 @@
 \documentclass[10pt]{article}
 \usepackage[a4paper,margin=0.6in]{geometry}
 \usepackage{graphicx,booktabs,amsmath,xcolor,enumitem}
-\usepackage[font=small,skip=2pt]{caption}
+\usepackage[font=small,skip=3pt]{caption}
+\usepackage[compact]{titlesec}
 \usepackage[hidelinks]{hyperref}
 \setlength{\parindent}{0pt}
-\setlength{\parskip}{3pt}
+\setlength{\parskip}{3.5pt}
 \setlist{nosep,leftmargin=*}
+
+\definecolor{accent}{RGB}{0,70,140}
+\titleformat{\section}{\normalsize\bfseries\color{accent}}{\thesection}{0.5em}{}
+\titlespacing*{\section}{0pt}{4pt}{1pt}
+\newcommand{\key}[1]{\textbf{#1}}
 
 \title{\vspace{-1.4cm}\large DDA5001 Final Project Part I: Pre-training a Small GPT on Shakespeare\vspace{-0.25cm}}
 \author{\normalsize David LIU \quad Student ID: 226040348 \quad (individual group)}
@@ -14,55 +20,62 @@
 \begin{document}
 \maketitle
 
-\textbf{Setup.} Fixed course configuration for all runs: GPT-2-medium preset (24 layers, 16 heads, $d=1024$, 302.4M parameters), character vocabulary of 65, context 256, batch 72, 5{,}000 updates (92.16M prediction tokens, about 92 passes over the 1.00M-token training split), 100 warm-up steps and cosine decay to $0.1\times$ peak LR, dropout 0.2, no weight decay, clipping 1.0, bf16, \texttt{torch.compile}. Only the optimizer, its peak LR and \texttt{out\_dir} change. Muon updates the 2-D hidden matrices; embeddings, tied head, norms and biases use the auxiliary AdamW at $3\times10^{-4}$. One RTX 4090 per run, no hardware adaptations (peak memory 21.8\,GB). \emph{Second LR:} the default AdamW and Muon validation losses rose after 9--18M tokens, so I cut their LRs to $1/3$; SGDM's training loss fell slowly and smoothly, so I doubled its LR.
+\textbf{Setup.} Fixed course configuration: GPT-2-medium preset (24 layers, 16 heads, $d=1024$, 302.4M parameters), 65-character vocabulary, context 256, batch 72, 5{,}000 updates (92.16M tokens, $\approx$92 passes over the 1.00M-token training split), 100 warm-up steps, cosine decay to $0.1\times$ peak LR, dropout 0.2, no weight decay, clipping 1.0, bf16, \texttt{torch.compile}. Only the optimizer, its peak LR and \texttt{out\_dir} change. Muon updates the 2-D hidden matrices; embeddings, tied head, norms and biases use the auxiliary AdamW at $3\times10^{-4}$. One RTX 4090 per run (peak memory 21.8\,GB). \emph{Second LR:} default AdamW and Muon validation losses rose after 9--18M tokens, so I cut their LRs to $1/3$; SGDM's training loss fell slowly and smoothly, so I doubled its LR.
 
+\section{Loss curves, endpoint validation losses and training times}
+\vspace{-2pt}
 \begin{figure}[h]
 \centering
 \includegraphics[width=\linewidth]{figures/six_runs_train_val.png}
 \caption{Training (dashed) and validation (solid, markers) loss of the six runs, evaluated every 500 updates (9.2M tokens).}
 \label{fig:curves}
 \end{figure}
-\vspace{-8pt}
+\vspace{-12pt}
 
 \begin{table}[h]
 \centering\small
-\setlength{\tabcolsep}{5pt}\begin{tabular}{llcccc}
+\setlength{\tabcolsep}{6pt}\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{llcccc}
 \toprule
-Optimizer & Peak LR & Endpoint val (\texttt{last.pt}) & Min.\ val (at tokens) & Train time & Copied windows \\
+Optimizer & Peak LR & \textbf{Endpoint val} (\texttt{last.pt}) & Min.\ val (at tokens) & \textbf{Train time} & Copied windows \\
 \midrule
 AdamW & $3\times10^{-4}$ (default) & 3.979 & 1.551 (18.4M) & 29.8 min & 67\% \\
 AdamW & $1\times10^{-4}$ & 3.554 & 1.558 (18.4M) & 30.1 min & 33\% \\
+\addlinespace[1pt]
 Muon  & $1\times10^{-2}$ (default) & 4.100 & 1.542 (9.2M) & 34.1 min\textsuperscript{*} & 100\% \\
 Muon  & $3\times10^{-3}$ & 4.239 & 1.567 (9.2M) & 34.9 min & 100\% \\
-SGDM  & $0.1$ (default) & \textbf{1.665} & \textbf{1.511} (46.1M) & 30.0 min & 0\% \\
-SGDM  & $0.2$ & 1.671 & 1.548 (46.1M) & 29.6 min & 0\% \\
+\addlinespace[1pt]
+SGDM  & $0.1$ (default) & \textbf{1.665} & \textbf{1.511} (46.1M) & 30.0 min & \textbf{0\%} \\
+SGDM  & $0.2$ & \underline{1.671} & 1.548 (46.1M) & \textbf{29.6 min} & \textbf{0\%} \\
 \bottomrule
 \end{tabular}
-\caption{Results at the end of the 92.16M-token budget. Train time is \texttt{train\_seconds} (no evaluation or checkpoint I/O). Copied windows: share of 40-character windows of the 400-character sample found verbatim in the training split (App.~\ref{app:copy}). \textsuperscript{*}Re-run on an idle GPU (App.~\ref{app:time}).}
+\caption{Results at the end of the 92.16M-token budget (\textbf{best}, \underline{second best}). Train time is \texttt{train\_seconds} (no evaluation or checkpoint I/O). Copied windows: share of 40-character windows of the 400-character sample found verbatim in the training split (App.~\ref{app:copy}). \textsuperscript{*}Re-run on an idle GPU (App.~\ref{app:time}).}
 \label{tab:results}
 \end{table}
-\vspace{-8pt}
+\vspace{-14pt}
 
-\textbf{Overfitting decides the endpoint, and it causes a crossover.} With 302M parameters and about 92 passes over 1.00M training characters, every run reaches its minimum validation loss early and then rises while training loss keeps falling (to 0.06--0.09 for AdamW and Muon). The fast optimizers reach the minimum first and also start memorizing first, so the ranking reverses: at the default LRs, Muon (1.54) $<$ AdamW (1.68) $<$ SGDM (2.13) at 9.2M tokens, but SGDM is lowest from 27.6M tokens; from 36.9M both SGDM runs are below all four others, ending at 1.67 against 3.55--3.98 (AdamW) and 4.10--4.24 (Muon). The samples agree: Muon's is copied verbatim from the training text, SGDM's shares no 40-character window with it.
+\section{Learning-rate effects and crossover}
+\textbf{Crossover: overfitting decides the endpoint.} With 302M parameters and $\approx$92 passes over 1.00M characters, every run reaches its minimum validation loss early and then rises while training loss keeps falling (to 0.06--0.09 for AdamW and Muon). Fast optimizers reach the minimum first but also memorize first, so \key{the ranking reverses}: at default LRs, Muon (1.54) $<$ AdamW (1.68) $<$ SGDM (2.13) at 9.2M tokens, but \key{SGDM is lowest from 27.6M tokens}; from 36.9M both SGDM runs are below all four others, ending at \key{1.67} vs.\ 3.55--3.98 (AdamW) and 4.10--4.24 (Muon). The samples agree: Muon's is copied verbatim from the training text, SGDM's shares no 40-character window with it.
 
-\textbf{Learning-rate effects.} \emph{AdamW}: lowering the LR to $10^{-4}$ slows early progress (1.77 vs.\ 1.68 at 9.2M tokens) but delays memorization; the curves cross between 18.4M and 27.6M tokens, the endpoint improves by 0.43 nats and the copied share halves, while the minimum is almost unchanged (1.558 vs.\ 1.551). \emph{SGDM}: doubling the LR helps early (lower validation loss up to 27.6M tokens), the curves cross between 27.6M and 36.9M tokens, and the endpoint is almost the same (+0.005). \emph{Muon}: lowering the LR did not help. The curves cross twice ($3\times10^{-3}$ is lower at 18.4M tokens, higher from 27.6M) and the endpoint is 0.14 nats worse. A plausible reason, not tested here, is that the auxiliary AdamW, unchanged at $3\times10^{-4}$, still fits the embeddings and tied head. \emph{Time}: AdamW and SGDM take 0.36\,s per update; Muon takes 0.41--0.42\,s on an idle GPU (+14--17\%), likely from its orthogonalization step.
+\textbf{Learning-rate effects.} \emph{AdamW}: lowering the LR to $10^{-4}$ slows early progress (1.77 vs.\ 1.68 at 9.2M) but delays memorization; the curves cross between 18.4M and 27.6M tokens, \key{the endpoint improves by 0.43 nats} and the copied share halves, while the minimum is almost unchanged (1.558 vs.\ 1.551). \emph{SGDM}: doubling the LR helps early (lower validation loss up to 27.6M), the curves cross between 27.6M and 36.9M, and the endpoint is almost the same (+0.005). \emph{Muon}: \key{lowering the LR did not help}; the curves cross twice ($3\times10^{-3}$ lower at 18.4M, higher from 27.6M) and the endpoint is 0.14 nats worse. A plausible reason, not tested here, is that the auxiliary AdamW, unchanged at $3\times10^{-4}$, still fits the embeddings and tied head. \emph{Time}: AdamW and SGDM take 0.36\,s per update; \key{Muon takes 0.41--0.42\,s (+14--17\%)} on an idle GPU, likely from its orthogonalization step.
 
-\textbf{Sample} (SGDM, peak LR 0.1, \texttt{last.pt}, seed 1234, first lines):
-\vspace{-5pt}
+\section{Text sample: SGDM, peak LR 0.1 (\texttt{last.pt}, seed 1234; first lines, speaker line breaks removed)}
+\vspace{-4pt}
 {\small\begin{verbatim}
 CAMILLO: I shall most perform your good friends.  DUKE VINCENTIO: Is the lady?
 LUCIO: From whom you may, there's no better knave?
 \end{verbatim}}
-\vspace{-12pt}
-(Line breaks after speaker names removed to save space.)
+\vspace{-14pt}
 
-\textbf{Difficulties and solutions.} (1) \emph{Copied text}: the AdamW and Muon samples read like real Shakespeare, so I measured their verbatim overlap with the training split (Table~\ref{tab:results}). (2) \emph{Unfair timing}: the first default-Muon run shared its GPU with another process (0.59\,s per update), so I re-ran it on an idle GPU (App.~\ref{app:time}).
+\section{Difficulties, solutions and contribution}
+\textbf{(1) Copied text.} The AdamW and Muon samples read like real Shakespeare. \emph{Solution:} I measured their verbatim overlap with the training split (Table~\ref{tab:results}, App.~\ref{app:copy}). \textbf{(2) Unfair timing.} The first default-Muon run shared its GPU with another process (0.59\,s per update). \emph{Solution:} I re-ran it on an idle GPU (App.~\ref{app:time}).
 
 \textbf{Contribution.} Individual group; all work by David LIU. A coding agent (Claude Code) helped, following \texttt{AGENTS.md}, to fill the TODO blocks, write the analysis script and draft this report; I ran all experiments and checked the results.
 
 \label{end-main}
 \clearpage
 \appendix
+\renewcommand{\thesection}{\Alph{section}}
 \section{Muon re-run}\label{app:time}
 The first default-Muon run shared its GPU with another process and took 0.594\,s per update, against 0.410\,s when re-run on an idle GPU of the same model (RTX 4090). The re-run used the same seed (42); its endpoint validation loss is 4.100 against 4.085 (minimum 1.542 against 1.538), a small gap likely due to non-deterministic bf16 kernels. All reported Muon $10^{-2}$ numbers come from the re-run.
 
